@@ -285,5 +285,45 @@ const res = await fetch("https://api2.cursor.sh/auth/usage-summary", {
 if (res.status === 401) {
     // needs re-auth
 }
-const json = await res.json();
-```
+#### Interpreting the response
+
+-   Convert to remaining percent:
+    -   `percentage = remainingFraction * 100`
+-   Suggested filtering:
+    -   include models whose names contain `gemini` or `claude` (if you want to display only relevant model quotas)
+-   Forbidden handling:
+    -   If response status is `403`, mark `isForbidden = true` for that account/provider.
+
+#### Troubleshooting `403 Forbidden`
+
+`403` usually means the token is **valid enough to authenticate** but **not allowed** to access this quota API. Common causes:
+
+-   **Provider says `PERMISSION_DENIED`**
+    -   Example response:
+        -   `{"error":{"code":403,"message":"The caller does not have permission","status":"PERMISSION_DENIED"}}`
+    -   Meaning: the account behind the token is not entitled/allowed to call this endpoint (or not allowed for the inferred project/context).
+
+-   **Missing/invalid project context**
+    -   Fix: call `loadCodeAssist` first and pass `{"project":"<cloudaicompanionProject>"}` into `fetchAvailableModels`.
+-   **Expired/invalid access token**
+    -   Fix: refresh the access token _if_ you have a refresh token **and** valid client credentials; otherwise re-auth.
+-   **Headers rejected**
+    -   Fix: ensure `Authorization: Bearer ...` and `Content-Type: application/json` are present.
+    -   **CRITICAL**: You MUST send a client-like `User-Agent` such as `antigravity/1.11.3 Darwin/arm64`. The API blocks requests without this specific agent string.
+-   **Account not entitled / access revoked / org policy**
+    -   Fix: treat as `isForbidden=true` and surface a user-facing “no access” message; re-auth may not help if the account has no entitlement.
+-   **Internal endpoint changed / gated**
+    -   Fix: capture the response body (redacting tokens) and treat as `schema_changed` / `endpoint_changed`.
+
+#### “Works in the app, fails in my Node/TS script” (common cause)
+
+Two very common differences between GUI apps and Node scripts:
+
+-   **Proxy usage**
+    -   Many HTTP client stacks can automatically respect system proxy settings.
+    -   Node’s `fetch` typically **does not** automatically use macOS system proxy settings.
+    -   If your working setup relies on a proxy (corporate proxy, VPN proxy, upstream proxy, etc.), configure it explicitly in Node:
+        -   via `HTTPS_PROXY` / `HTTP_PROXY` env vars (and a proxy-aware HTTP agent), or
+        -   via a library like `https-proxy-agent`.
+-   **Header parity**
+    -   Internal endpoints can be picky. Ensure your script sends the same required headers (`Authorization`, `Content-Type`, and sometimes `User-Agent`) and the same request body (`project` field when required).

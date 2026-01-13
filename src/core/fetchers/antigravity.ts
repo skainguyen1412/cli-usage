@@ -68,6 +68,35 @@ export class AntigravityFetcher extends ProviderFetcher {
 
     if (!config.noNetwork) {
         try {
+            // A. Fetch Project ID (loadCodeAssist)
+            let projectId: string | undefined;
+            try {
+                const subResp = await this.fetchWithTimeout(
+                    'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
+                    {
+                        method: 'POST',
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json',
+                            'User-Agent': 'antigravity/1.11.3 Darwin/arm64',
+                        },
+                        body: JSON.stringify({ metadata: { ideType: 'ANTIGRAVITY' } })
+                    },
+                    config.timeout * 1000
+                );
+                
+                if (subResp.ok) {
+                    const subData = await subResp.json() as any;
+                    if (subData.cloudaicompanionProject) {
+                        projectId = subData.cloudaicompanionProject;
+                        debug(`Antigravity Project ID: ${projectId}`);
+                    }
+                }
+            } catch (pErr) {
+                debug('Failed to fetch Antigravity project ID', pErr);
+            }
+
+            // B. Fetch Available Models
             const response = await this.fetchWithTimeout(
                 'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
                 {
@@ -75,14 +104,17 @@ export class AntigravityFetcher extends ProviderFetcher {
                     headers: {
                         Authorization: `Bearer ${accessToken}`,
                         'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({})
+                        'User-Agent': 'antigravity/1.11.3 Darwin/arm64',
+                    }, // If we have project ID, send it
+                    body: JSON.stringify(projectId ? { project: projectId } : {})
                 },
                 config.timeout * 1000
             );
 
             if (response.ok) {
                 const data = await response.json() as any;
+                debug('Antigravity models response', data.models ? Object.keys(data.models) : 'no models');
+                
                 if (data && data.models) {
                     for (const [modelId, info] of Object.entries(data.models)) {
                         const mInfo = info as any;
@@ -90,8 +122,7 @@ export class AntigravityFetcher extends ProviderFetcher {
                             const remainingFraction = mInfo.quotaInfo.remainingFraction ?? -1;
                             const percentage = remainingFraction >= 0 ? remainingFraction * 100 : -1;
                             
-                            // Filter for relevant models if needed, or just include all
-                            // We typically care about 'gemini' and 'claude'
+                            // Include if known model family or if it has quota info
                             if (modelId.includes('gemini') || modelId.includes('claude')) {
                                 models.push(this.createModelQuota(modelId, percentage, mInfo.quotaInfo.resetTime, { used: usageCount }));
                             }
@@ -100,6 +131,13 @@ export class AntigravityFetcher extends ProviderFetcher {
                 }
             } else {
                 apiError = `API ${response.status}`;
+                debug(`Antigravity quota API error: ${response.status}`);
+                
+                // Try to read body for error details
+                try {
+                   const errorBody = await response.text();
+                   debug(`Antigravity error body: ${errorBody}`);
+                } catch (e) { /* ignore */ }
             }
         } catch (err) {
              debug('Antigravity API failed', err);
