@@ -42,12 +42,71 @@ export class CursorFetcher extends ProviderFetcher {
         planType = membershipEntry.value;
       }
       
+      // usage count
+      let promptCount = -1;
+      const promptCountEntry = db.prepare("SELECT value FROM ItemTable WHERE key = 'freeBestOfN.promptCount'").get() as { value: string } | undefined;
+      if (promptCountEntry && promptCountEntry.value) {
+        promptCount = parseInt(promptCountEntry.value, 10);
+      }
+      
       db.close();
 
-      // Create a generic model quota (unlimited for pro, maybe limits for free)
-      // Since we don't know the usage, we return -1
-      models.push(this.createModelQuota('cursor-requests', -1, null));
-      models.push(this.createModelQuota('cursor-fast-requests', -1, null)); // For pro users
+      // Map status to plan name
+      if (planType === 'active') planType = 'Pro';
+      if (planType === 'trialing') planType = 'Pro Trial';
+
+      // 1. Fetch Real Usage API
+      if (!config.noNetwork && account.authData.accessToken) {
+        try {
+          const response = await this.fetchWithTimeout(
+            'https://api2.cursor.sh/auth/usage-summary',
+            {
+              headers: {
+                Authorization: `Bearer ${account.authData.accessToken}`,
+                Accept: 'application/json',
+              },
+            },
+            config.timeout * 1000
+          );
+
+          if (response.ok) {
+            const data = await response.json() as any;
+            
+            // Plan Usage
+            if (data.individualUsage?.plan) {
+               const p = data.individualUsage.plan;
+               const limit = p.limit || 0;
+               const remaining = p.remaining ?? -1;
+               const percentage = limit > 0 ? (remaining / limit) * 100 : -1;
+               models.push(this.createModelQuota('cursor-plan', percentage, data.billingCycleEnd, {
+                 used: p.used,
+                 limit: limit,
+                 remaining: remaining
+               }));
+            }
+            
+            // On Demand
+            if (data.individualUsage?.onDemand?.enabled) {
+               const od = data.individualUsage.onDemand;
+               const limit = od.limit || 0;
+               const remaining = od.remaining ?? -1;
+               // If no limit, treat as 100% remaining or -1
+               const percentage = limit > 0 ? (remaining / limit) * 100 : (od.limit === null ? 100 : -1);
+               models.push(this.createModelQuota('cursor-on-demand', percentage, data.billingCycleEnd, {
+                 used: od.used,
+                 limit: limit,
+                 remaining: remaining
+               }));
+            }
+          }
+        } catch (err) {
+          debug('Cursor API failed', err);
+        }
+      }
+
+      // 2. Add Local Metrics (as supplementary "cursor-local-prompts")
+      // We rename it to distinguish from official plan usage
+      models.push(this.createModelQuota('cursor-local-prompts', -1, null, { used: promptCount }));
 
       return this.successResult(account, models, planType);
 

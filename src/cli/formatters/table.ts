@@ -38,7 +38,11 @@ export function formatQuotaTable(providers: ProviderQuotaData[], errors: CLIErro
     // Format percentage
     let percentageStr: string;
     if (percentage < 0) {
-      percentageStr = chalk.gray('unknown');
+      if (provider.planType?.toLowerCase().includes('pro')) {
+        percentageStr = chalk.green('Unlimited');
+      } else {
+        percentageStr = chalk.gray('unknown');
+      }
     } else if (percentage < 25) {
       percentageStr = chalk.red(`${percentage.toFixed(0)}%`);
     } else if (percentage < 50) {
@@ -67,6 +71,18 @@ export function formatQuotaTable(providers: ProviderQuotaData[], errors: CLIErro
     }
     if (provider.models.length > 1 && lowestModel) {
       notes.push(chalk.gray(`(lowest: ${lowestModel.name})`));
+    }
+    
+    // Add usage note if we have it but no limit
+    if (lowestModel && lowestModel.used && lowestModel.used > 0 && percentage < 0) {
+        notes.push(chalk.gray(`(used: ${formatNumber(lowestModel.used)})`));
+    }
+    
+    // Add "No public API" note if unknown and not otherwise noted
+    if (percentage < 0 && !provider.isForbidden && !provider.needsReauth && !provider.error) {
+       if (['antigravity', 'gemini-cli'].includes(provider.provider)) {
+         notes.push(chalk.gray('(No public quota API)'));
+       }
     }
 
     table.push([

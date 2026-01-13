@@ -34,6 +34,38 @@ describe('Table Formatter', () => {
       expect(output).toContain('50%');
     });
 
+    it('should show Unlimited for Pro plans with unknown quota', () => {
+       const mockProvider: ProviderQuotaData = {
+        provider: 'cursor',
+        account: 'test',
+        planType: 'Pro',
+        isForbidden: false,
+        isStale: false,
+        needsReauth: false,
+        lastUpdated: new Date().toISOString(),
+        models: [{ name: 'cursor-requests', percentage: -1, resetTime: null, resetInSeconds: null }]
+      };
+      
+      const output = formatQuotaTable([mockProvider], []);
+      expect(output).toContain('Unlimited');
+    });
+
+    it('should show No API note for Antigravity', () => {
+       const mockProvider: ProviderQuotaData = {
+        provider: 'antigravity',
+        account: 'test',
+        planType: null,
+        isForbidden: false,
+        isStale: false,
+        needsReauth: false,
+        lastUpdated: new Date().toISOString(),
+        models: [{ name: 'model', percentage: -1, resetTime: null, resetInSeconds: null }]
+      };
+      
+      const output = formatQuotaTable([mockProvider], []);
+      expect(output).toContain('(No public quota API)');
+    });
+
     it('should show warnings for forbidden/reauth', () => {
        const mockProvider: ProviderQuotaData = {
         provider: 'claude',
